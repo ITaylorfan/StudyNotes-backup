@@ -356,3 +356,264 @@ mainF(discover)
 
  <div align=left><img  src="https://img.imgdb.cn/item/60117cce3ffa7d37b343aae8.png"/></div>
 
+
+
+## 4.使用前端神器puppeteer做爬虫
+
+> Puppeteer 是一个控制 headless Chrome 的 Node.js API 。它是一个 Node.js 库，通过 [DevTools 协议](https://chromedevtools.github.io/devtools-protocol/)提供了一个高级的 API 来控制 [headless](https://developers.google.com/web/updates/2017/04/headless-chrome) Chrome。它还可以配置为使用完整的（非 headless）Chrome。
+>
+> 在浏览器中手动完成的大多数事情都可以通过使用 Puppeteer 完成。
+
+**安装puppeteer库**
+
+```bash
+npm instal puppeteer
+```
+
+### 4.1爬取猫眼电影热映电影的数据
+
+![正在热映](https://img.imgdb.cn/item/6017eda93ffa7d37b3f46005.png)
+
+> 直接使用axios来爬取比较困难，此网站有滑块验证
+>
+> 使用puppeteer中的鼠标事件 可以模拟拖动以破解验证码(此网站验证码缺口出现位置不是随机的比较简单)
+
+![滑块验证](https://img.imgdb.cn/item/6017ee1d3ffa7d37b3f4932d.png)
+
+> 滑块的内容在iframe框架中，无法直接获取dom
+
+![iframe](https://img.imgdb.cn/item/6017ee973ffa7d37b3f4be9d.png)
+
+### 4.2代码
+
+```js
+//导入puppeteer库
+const puppeteer = require("puppeteer")
+//导入自定义写入模块
+const { writeJson } = require("./write")
+
+//爬取猫眼电影 正在热映的电影数据
+const baseUrl = "https://maoyan.com"
+async function mainF() {
+    let option = {
+        //是否开启无头浏览器模式
+        headless: true,
+        //设置可视区域大小
+        defaultViewport: {
+            width: 1200,
+            height: 900
+        },
+        // 获取跨域iframe中的内容  关键
+        args: [
+            '--disable-web-security',
+            '--disable-features=IsolateOrigins,site-per-process', // 很关键...
+        ],
+        //放慢速度
+        //   slowMo:100
+    }
+    const bowser = await puppeteer.launch(option)
+    let page = await bowser.newPage()
+    await page.goto(baseUrl)
+    //等待全部按钮加载完成
+    await page.waitForSelector(".panel-header>.panel-more>a")
+    //获取 全部 按钮 的dom
+    //注意这里 的这个类被用到多次
+    let btn = await page.$$(".panel-header>.panel-more")
+    //跳转到正在热映的全部电影 2正在热映 3即将上映
+    await btn[2].click()
+    //等待路由跳转完成
+    await page.waitForNavigation()
+    //等待电影区块加载完成
+    await page.waitForSelector(".movie-list>dd")
+    await page.waitForSelector(".movie-list>dd>.movie-item.film-channel>a>.movie-poster>img:last-child")  
+    //存放所有数据
+    let totalData = await page.$$eval(".movie-list>dd", el => {
+        //回调函数中无法直接使用外部变量
+        let totalData = []
+        el.forEach((item, index) => {
+            //标题 
+            let titleDom = item.querySelector(".channel-detail.movie-item-title")
+            //评分
+            let scoreDom = item.querySelector(".channel-detail.channel-detail-orange")
+            //详情
+            let detailDom = item.querySelector(".movie-item.film-channel>a")
+            //图片链接
+            let imgDom = item.querySelector(".movie-item.film-channel>a>.movie-poster>img:last-child")
+            let obj = {
+                title: titleDom.getAttribute("title"),
+                score: scoreDom.innerHTML === "暂无评分" ? '暂无评分' : scoreDom.innerHTML.replace(/\D/g, ""),
+                //图片属性 因为懒加载 所以链接属性会不同 src
+                img_Url: imgDom.getAttribute("data-src"),
+                detail_Url: detailDom.getAttribute("href")
+            }
+            if (obj.score !== "暂无评分") {
+                obj.score = obj.score[0] + "." + obj.score[1]
+            }
+            totalData.push(obj)
+        })
+        return totalData
+    })
+    console.log(totalData.length)
+    //关闭首页的浏览器
+    bowser.close()
+    
+    //遍历获取到的所有内容 然后点击
+    for (let i = 0; i < totalData.length; i++) {
+        const bowser = await puppeteer.launch(option)
+        let page = await bowser.newPage()
+        //打开 详情页面 可能需要人机验证
+        await page.goto(baseUrl + totalData[i].detail_Url)
+
+        //处理滑块验证  验证区域加载的是iframe框架
+        let url = page.url()
+        //console.log(url)
+        //表示跳转到了验证页面 破解滑块验证 只能破解有规律的 缺口出现位置差不多的 随机缺口未实现
+        if (url.includes("https://verify.maoyan.com/")) {
+            //等待框架
+            await page.waitForSelector("#tcaptcha_transform iframe")
+            //获取框架
+            const elementHandle = await page.$('#tcaptcha_transform iframe');
+            //获取框架内容
+            const frame = await elementHandle.contentFrame();
+            //等待框架跳转
+            await frame.waitForNavigation()
+            //获取滑块dom
+            let thumb = await frame.$("#tcaptcha_drag_thumb")
+            //获取滑块的位置信息
+            let thumbPosInfo = await thumb.boundingBox()
+            console.log(thumbPosInfo.x, thumbPosInfo.y, thumbPosInfo.width, thumbPosInfo.height)
+            //鼠标移动到此位置
+            await page.mouse.move(thumbPosInfo.x + 30, thumbPosInfo.y);
+            // 按下鼠标
+            await page.mouse.down();
+            //获取进度条宽度
+            let track = await frame.$(".tc-drag-track")
+            let trackPosInfo = await track.boundingBox()
+            console.log(trackPosInfo.x, trackPosInfo.y, trackPosInfo.width, trackPosInfo.height)
+            // 一点点移动鼠标
+            for (let i = 0; i < trackPosInfo.width - 54 - thumbPosInfo.width; i++) {
+                await page.mouse.move(thumbPosInfo.x + 30 + i, thumbPosInfo.y);
+            }
+            //松开鼠标
+            await page.mouse.up();
+        }
+
+        //等待需要的内容加载
+        await page.waitForSelector(".movie-brief-container>.ename.ellipsis")
+        //获取我们需要的内容
+        let enName = await page.$eval(".movie-brief-container>.ename.ellipsis", el => el.innerHTML)
+        let type = await page.$$eval(".movie-brief-container>ul>li>a", el => {
+            let type = []
+            el.forEach((item, index) => {
+                type.push(item.innerHTML)
+            })
+            return type
+        })
+        let movieLength = await page.$eval(".movie-brief-container>ul>li:nth-child(2)", el => el.innerText)
+        let timeAndAdress = await page.$eval(".movie-brief-container>ul>li:last-child", el => el.innerHTML)
+        let synopsis = await page.$eval(".mod-content>.dra", el => el.innerHTML)
+        let bigImg_Url = await page.$eval(".celeInfo-left>.avatar-shadow>img", el => el.getAttribute("src"))
+        //封装
+        let obj = {
+            enName,
+            type: type,
+            movieLength,
+            timeAndAdress,
+            synopsis,
+            bigImg_Url
+        }
+        //合并对象
+        totalData[i] = { ...totalData[i], ...obj }
+        //调用自定义写入模块 写入json
+        writeJson(totalData[i])
+        //完成一个页面就关闭浏览器
+        bowser.close()
+    }
+}
+//调用主函数
+mainF()
+
+```
+
+**自定义json写入模块 write.js**
+
+```js
+//自定义 写入模块
+const fs = require("fs")
+function writeJson(myJsonData) {
+    //如果存在就读取
+    if (fs.existsSync("./movie.json")) {
+        jsonData = fs.readFileSync("./movie.json")
+        // console.log(jsonData)
+        if (typeof JSON.parse(jsonData) === "object") {
+            console.log("是json")
+            jsonData = JSON.parse(jsonData)   //转成对象
+            jsonData = [...jsonData,myJsonData]  //合并数据
+        } else {  //为其他数据 或者空 直接覆盖
+            jsonData =[myJsonData]
+        }
+    } else {    //不存在 就直接写入
+        jsonData =[myJsonData]
+    }
+    let i=jsonData.length
+    //序列化
+    jsonData = JSON.stringify(jsonData)
+    //获取一个完成
+    fs.writeFileSync("./movie.json", jsonData)
+    console.log("写入json数据成功！" + i + "个")
+}
+//抛出方法
+module.exports={
+    writeJson
+}
+```
+
+### 4.3完成截图
+
+![json截图](https://img.imgdb.cn/item/6017f05c3ffa7d37b3f572b2.jpg)
+
+### 4.4存在问题
+
+**1.只能获取全部数据中的一页数据，如果有多页获取后面的数据未能获取**
+
+**2.json会写入重复数据，完成后需要去重**
+
+**去重代码：**
+
+```js
+let fs=require("fs")
+//直接使用 node 命令运行 进行去重
+//对获取到的数据去重
+function mainF(){
+    if(fs.existsSync("./movie.json")){
+        let jsonData=fs.readFileSync("./movie.json")
+        jsonData=JSON.parse(jsonData)
+        console.log("去重前有"+jsonData.length+"条数据")
+        jsonData=quchong(jsonData)
+        console.log("去重后有"+jsonData.length+"条数据")
+        jsonData=JSON.stringify(jsonData)
+        fs.writeFileSync("./movie.json",jsonData)
+        console.log("去重完成！")
+    }else{
+        console.log("未找到源数据！")
+    }
+}
+function quchong(arr) {
+    let array = [];
+    for(let i = 0; i < arr.length; i++) {
+        let isChage = true;
+        for(let z = 0; z < array.length; z++) {
+            if(arr[i]['title'] == array[z]['title']) {
+                isChage = false;
+            }
+        }
+        if(isChage) {
+            array.push(arr[i]);
+        }
+    }
+    return array;
+}
+//调用主函数
+mainF()
+```
+
