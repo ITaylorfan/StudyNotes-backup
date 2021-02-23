@@ -888,3 +888,451 @@ function insert(insertSql, data) {
 mainF()
 ```
 
+## 10.express服务器
+
+### 10.1简单使用
+
+**安装**
+
+```bash
+npm install express --save
+```
+
+**代码**
+
+```js
+const express=require("express")
+const fs=require("fs")
+const app=express()
+const port=4000
+
+//开启静态资源访问  会自动打开该目录下的index.html文件
+app.use('/static', express.static('public'))
+
+//普通字符串路由匹配
+app.get("/",(req,res)=>{
+    //返回静态文件
+    let rs=fs.createReadStream("./public/index.html")
+    rs.pipe(res)
+    // res.send("你好世界！")
+})
+
+//字符串模式路由匹配
+app.get("/abc?d",(req,res)=>{
+    res.send("这个c可有可无")
+})
+
+app.get("/aw+zc",(req,res)=>{
+    res.send("w后可以添加n个w")
+})
+app.get("/zx*cv",(req,res)=>{
+    res.send("zx和cv之间可以添加任何字符")
+})
+
+//正则匹配模式
+
+// n位的数字：^\d{n}$
+// 至少n位的数字：^\d{n,}$
+// m-n位的数字：^\d{m,n}$
+app.get(/\/a\d{10,}/,(req,res)=>{
+    res.send("以/a开头并且后面有10个以上的数字")
+})
+
+//动态路由  可以获取参数
+app.get("/news/:id/image:img_id",(req,res)=>{
+    res.send(req.params.id+req.params.img_id)
+})
+
+
+//设置监听端口
+app.listen(port,()=>{
+    console.log("启动服务器成功！","http://localhost:"+port)
+})
+```
+
+### 10.2中间件
+
+> 在客户端叫做拦截器，在服务端叫做中间件。可以进行路由拦截操作
+
+```js
+//...
+//测试中间件 客户端叫拦截器 服务端叫中间件
+app.get("/my",(req,res,next)=>{
+    res.send("这是my的页面")
+    //调用中间件
+    next()
+},(req,res,next)=>{
+    console.log("调用了中间件")
+})
+//创建中间件 
+//全局中间件 下面的请求都会触发
+app.use((req,res,next)=>{
+    console.log("调用了监听下面所有路径的中间件")
+    //如果不调用next 无法向下执行
+    next()
+})
+//这个中间件只监听/zjj路径  无法监听写在此方法前面的路径
+app.use("/zjj",(req,res,next)=>{
+    console.log("调用了监听/zjj路径的中间件")
+    //如果不调用next 无法向下执行
+    next()
+})
+
+//上面的中间件可以监听 这个请求  如果这个请求写在中间件前 将无法触发
+app.get("/zjj",(req,res)=>{
+    res.send("这是中间件测试方法")
+})
+//...
+```
+
+### 10.3获取表单提交参数&获取URL地址栏中的参数
+
+**前端页面**
+
+```html
+<form action="/search" method="get">
+    <!-- name必须 -->
+   输入内容： <input type="text"  name="query">
+   <input type="submit" >
+</form>
+<h1>测试post提交表单</h1>
+<form action="/search" method="post">
+    <!-- name必须 -->
+    输入内容： <input type="text"  name="query">
+    <input type="submit" >
+</form>
+```
+
+**服务端代码**
+
+```js
+//...
+//重要 获取post表单数据需要   不使用扩展
+app.use(express.urlencoded({extended:false}))
+
+// 测试获取url中的参数 ?后面的内容
+app.get("/search",(req,res)=>{
+    // req.query可以获取?后面的参数
+    console.log(req.query.query)
+    res.send("你的查询内容为："+req.query.query)
+})
+// 测试post提交表单
+app.post("/search",(req,res)=>{
+    // post提交的数据不在query里，在body中  获取body内容需要使用urlencode模块
+    console.log(req.body)
+    res.send("你的查询内容为："+req.body.query)
+})
+//...
+```
+
+### 10.4跨域问题
+
+```js
+app.get("/zjj",(req,res)=>{
+    //解决跨域问题
+    res.append("Access-Control-Allow-Origin","*")
+    res.send("这是中间件测试方法") 
+})
+```
+
+### 10.5使用cookie
+
+**引入cookie模块 需要安装** 
+
+```bash
+npm i cookie-parser
+```
+
+```js
+//导入模块
+const cookieParser=require("cookie-parser")
+//cookie解析 可以用 req.cookies的方式读取cookie
+//secret 启用加密模式
+app.use(cookieParser("secret"));
+
+//设置cookie  此处未加密
+app.get("/setCookie",(req,res)=>{
+    //设置cookie key value option   30s过期  httpOnly 设置js脚本无法读取cookie 防止xss攻击
+    res.cookie("isLogin",true,{maxAge:30000,httpOnly:true})
+    res.send("设置cookie成功！")
+})
+// 获取cookie
+app.get("/getCookie",(req,res)=>{
+    //测试cookie读取
+    //1 直接读取headers里面的内容获取cookie
+    //let cookies=req.headers.cookie
+    //2 通过cookieParser模块读取解析好的cookie
+    let cookies=req.cookies
+    console.log(cookies)
+    let isLogin=req.cookies.isLogin
+    res.send("读取到的cookie为:"+"\n是否登录:"+isLogin)
+})
+
+//设置cookie 开启加密
+app.get("/setSecretCookie",(req,res)=>{
+    //设置cookie key value option  加密cookie  使用signed前需要 导入cookieparser 时设置参数
+    res.cookie("username","fanxuchao",{signed:true})
+    res.send("设置加密cookie成功！")
+})
+
+//获取加密后的cookie
+app.get("/getSecretCookie",(req,res)=>{
+    let cookies=req.signedCookies
+    console.log(cookies)
+    let username=cookies.username
+    res.send("读取到的cookie为:"+"\n用户名:"+username)
+})
+```
+
+[express-cookie中间件教程文档](https://www.expressjs.com.cn/resources/middleware/cookie-parser.html)
+
+### 10.6使用node加密模块自定义加密
+
+> 进行密码比较时直接使用加密后的内容进行比较，注意盐
+
+```js
+//导入node crypto 加密模块  无需安装
+const crypto=require("crypto")
+
+// 测试node加密模块crypto  简单加密方法
+app.get("/setEasyCrypto",(req,res)=>{
+    //加盐
+    let salt="fxc123123"
+    //需要加密的字符串
+    let password="fxc123456"
+    //加盐处理
+    password+=salt
+    //设置加密类型 算法
+    let md5 =crypto.createHash("md5")
+    //加密
+    md5.update(password)
+    //digest方法 计算传入要被哈希（使用 hash.update() 方法）的所有数据的摘要。 如果提供了 encoding，则返回字符串，否则返回 Buffer。
+    //输出16进制字符串
+    let secret = md5.digest("hex")
+    //输出加密后的字符串
+    console.log(secret)
+    //加入cookie
+    res.cookie("usernameMD5",secret)
+    res.send("设置加密成功！")
+})
+```
+
+### 10.7使用session
+
+**需要安装**
+
+```bash
+npm i express-session
+```
+
+```js
+//引入session模块
+const session=require("express-session")
+//启用session模块并进行配置
+app.use(session({
+    secret:"fxc",   //盐
+    saveUninitialized:true,  //保存初始化内容
+    resave:true, //强制保存
+    maxAge:7*24*60*60*1000   //设置一个星期过期
+}))
+
+// 测试session的使用
+app.get("/setSession",(req,res)=>{
+    req.session.username="fxc123"
+    //设置session过期时间
+    // req.session.cookie.maxAge=1000
+    res.send("设置session成功！")
+})
+
+//读取session
+app.get("/getSession",(req,res)=>{
+    let username= req.session.username
+    res.send("读取到的session内容为："+username)
+})
+
+//销毁session
+app.get("/DestorySession",(req,res)=>{
+    req.session.destroy(function(err) {
+        if(err){
+            console.log(err)
+            res.send(err)
+            return
+        }
+        console.log("销毁完成！")
+        res.send("销毁完成")
+    })
+})
+```
+
+[express-session中间件教程文档](https://www.expressjs.com.cn/resources/middleware/session.html)
+
+### 10.8文件上传
+
+**服务器端**
+
+```js
+// 测试文件上传 上传单个文件  upload.single("uploadImg") 里面的参数必须和表单的name保持一致
+app.post("/upload",upload.single("uploadImg"),(req,res,next)=>{
+    console.log(req.file)
+    //重命名文件
+    let oldName=req.file.path
+    let newName=req.file.path+req.file.originalname
+    try{
+        //node fs模块重命名
+        fs.rename(oldName,newName,err=>{
+            if(err)throw err
+            console.log("文件上传成功！文件大小为:"+(req.file.size/1024/1024).toFixed(2)+"MB")
+            let obj={
+                state:"OK",
+                img_url:"./static/uploads/"+req.file.filename+req.file.originalname,
+                time:Date.now()
+            }
+            //返回json
+            res.json(obj)
+        })
+    }catch(err){
+        res.send(err)
+    }
+  
+})
+```
+
+**使用HTML表单上传**
+
+```html
+ <h1>测试上传图片</h1>
+ <!-- 重要设置enctype="multipart/form-data" 如果使用默认的可能会 报请求过大的错误-->
+ <form action="/upload" method="post" enctype="multipart/form-data">
+    <!-- 限定只能为图片 -->
+    <input type="file" name="uploadImg" id="uploadImg" accept="image/*">
+    <input type="submit">
+</form>
+```
+
+**使用JQuery的Ajax上传**
+
+```html
+<h1>测试用Ajax上传图片</h1>
+<form  method="post" id="uploadForm">
+    <!-- 使用label关联 input 以实现自定义上传框 -->
+    <label for="uploadImgAjax">上传图片</label>  
+    <input type="file" name="uploadImg" id="uploadImgAjax" accept="image/*">
+    <div id="submit" style="border: 1px solid blue; width: 150px; height: 30px; text-align: center; line-height: 30px; cursor: pointer;">点击提交</div>		<!--不会触发表单默认的提交-->
+</form>
+<h1>图片预览</h1>
+<img src="" alt="" id="prevImg" style="height: 100%;width: 100%;">
+
+<!-- JQuery代码 -->
+<script>
+//实例化表单序列化对象
+let formDataObj=new FormData()
+//监听input变化 以预览图片
+$("#uploadImgAjax").change(e=>{
+    // console.log($("#uploadForm"))
+    let files=$("#uploadImgAjax")[0].files
+    console.log(files)
+    //解决多次点击上传 重复key值报错问题
+    formDataObj=new FormData()
+    //把图片文件加入序列化对象中
+    formDataObj.append("uploadImg",files[0])
+    // 生成临时url  参数为file
+    let imgUrl=window.webkitURL.createObjectURL(files[0])
+    //预览图片
+    $("#prevImg").attr("src",imgUrl)
+})
+
+// 点击提交
+$("#submit").click(e=>{
+    //ajax上传文件
+    $.ajax({
+        url:"/upload",
+        method:"post",
+        processData:false,    //重要属性 默认为true 为true时不会对表单进行序列化
+        data:formDataObj,     //data 需要上传的数据 为序列化表单
+        contentType:false,    //重要属性 默认为application/x-www-form-urlencoded 如果按此类型上传 服务器会报错 request entity too large
+        success:function(result){
+            console.log(result)
+        }
+    })
+})
+</script>
+```
+
+### 10.9文件下载
+
+**服务器端**
+
+```js
+// 测试文件下载
+app.get("/download",(req,res,next)=>{
+    //参数为 文件的相对路径
+    res.download("./public/1.jpg")
+})
+```
+
+**客户端**
+
+```html
+<h1>测试下载文件</h1>
+<a href="/download">点击下载一张图片</a>
+```
+
+
+
+### 10.10使用express脚手架
+
+**教程文档**：[express程序生成器](https://www.expressjs.com.cn/starter/generator.html)
+
+**可以快速生成服务器项目目录结构**
+
+<div align=left><img  src="https://img.imgdb.cn/item/602a76dc3ffa7d37b3685c27.jpg"/></div>
+
+
+
+### 10.11 ejs模板的简单使用
+
+```ejs
+ <div class="container">
+        <!-- 字符串插入 -->
+        <h1>等号插入数据：</h1>
+        <%=mytitle%>
+        <!-- 可以解析html标签 -->
+        <h1>横杠插入数据：</h1>
+        <%-mytitle%>
+
+        <!-- 条件判断 -->
+        <h1>这是判断的内容</h1>
+        <% if(sex=="男"){%>
+            <h1>蔡徐坤</h1>
+        <%}else{%>
+            <h1>Lisa</h1>
+        <%}%>
+
+        <!-- 循环 -->
+        <h1>这是循环的内容</h1>
+        <% for(let i=0;i<BLACKPINK.length;i++){%>
+            <h2><%=BLACKPINK[i]%></h2>
+        <%}%>
+
+        <!-- ejs注释 -->
+        <%# 
+            这是ejs的注释
+        %> 
+    </div>
+```
+
+## 11.node工具nodemon
+
+> 每次修改服务器代码时都需要**手动**重启服务器，使用此工具可以**自动**重启服务器
+
+### 11.1安装
+
+```bash
+npm install -g nodemon
+//或
+npm install --save-dev nodemon
+```
+
+**修改代码后自动重启**
+
+<div align=left><img  src="https://img.imgdb.cn/item/602a79163ffa7d37b3691295.jpg"/></div>
